@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     });
     const current = result.snapshot.val() as Record<string, any>;
     await Promise.all([
-      db.ref(`telemetry/${deviceId}`).push({ source: 'floodguard-telemetry-api', levelCm: Number(levelCm.toFixed(1)), batteryV: current.batteryV, signal: current.signal, recordedAt: now }),
+      db.ref(`telemetry/${deviceId}`).push({ source: 'floodguard-telemetry-api', levelCm: Number(levelCm.toFixed(1)), batteryV: current.batteryV ?? null, signal: current.signal, recordedAt: now }),
       // This intentionally contains only information appropriate for a public
       // status board. Operational data stays under the authenticated paths.
       db.ref(`publicStatus/${deviceId}`).set({ levelCm: current.levelCm, status: current.alert.status, isOnline: true, updatedAt: current.updatedAt }),
