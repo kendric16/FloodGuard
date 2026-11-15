@@ -124,6 +124,18 @@ window.FloodGuardUI = (() => {
       return;
     }
 
+    if (window.FloodGuardLogic && window.FloodGuardLogic.isReadingStale && window.FloodGuardLogic.isReadingStale()) {
+      wrap.innerHTML = `
+        <div class="forecast-headline">
+          <div class="f-icon">⏸️</div>
+          <div>
+            <div class="f-title">Forecast paused — no live readings</div>
+            <div class="f-sub">The latest sensor reading is old or the sensor reported a fault, so a trend projection would not be reliable. The forecast resumes when new readings arrive.</div>
+          </div>
+        </div>`;
+      return;
+    }
+
     if (!fc) {
       wrap.innerHTML = `
         <div class="forecast-headline">
@@ -198,13 +210,32 @@ window.FloodGuardUI = (() => {
   function renderDecisionSupport() {
     const wrap = $('decisionSupportBody');
     if (!wrap || !state.currentUser) return;
+    $('dsRoleTag').textContent = 'for ' + state.currentUser.role;
     const st = statusForLevel(state.level);
+    const actions = (config.DECISION_MATRIX[st.key] && config.DECISION_MATRIX[st.key][state.currentUser.roleKey]) || [];
+
+    const logic = window.FloodGuardLogic;
+    if (logic && logic.isReadingStale && logic.isReadingStale()) {
+      const ageMin = Math.max(0, Math.floor((Date.now() - state.lastTelemetryAt) / 60000));
+      const ageText = ageMin < 60 ? `${ageMin} min` : `${Math.floor(ageMin / 60)} hr`;
+      const items = [
+        `The sensor is not sending current readings (${state.sensorFault ? 'sensor fault reported' : 'last reading ' + ageText + ' ago'}). Confirm the water level at Bilog Falls on site or by phone before relying on this dashboard.`,
+        ...(st.key !== 'normal'
+          ? [`The last known level was ${formatMeters(state.level)} (${st.name}). Until it is verified, keep following the ${st.name} actions for your role:`, ...actions]
+          : [])
+      ];
+      wrap.innerHTML = `
+        <span class="ds-priority" style="color:#9fb0d8">No live data</span>
+        <ul class="ds-list">
+          ${items.map((a, i) => `<li><span class="n">${i + 1}</span><span>${a}</span></li>`).join('')}
+        </ul>
+        <div class="ds-basis">Shown because the latest reading is old or the sensor reported a fault.</div>`;
+      return;
+    }
+
     const fc = stateApi.computeForecast();
     const nextT = config.THRESHOLDS.find((t) => t.min > state.level);
     const etaMin = (fc && fc.slopeCmPerMin > 0.3 && nextT) ? Math.max(0, (nextT.min - state.level) / fc.slopeCmPerMin) : null;
-
-    $('dsRoleTag').textContent = 'for ' + state.currentUser.role;
-    const actions = (config.DECISION_MATRIX[st.key] && config.DECISION_MATRIX[st.key][state.currentUser.roleKey]) || [];
     const preemptive = (etaMin !== null && etaMin < 15 && st.key !== 'critical')
       ? [`Forecast shows the next threshold may be reached in ~${etaMin.toFixed(0)} min — begin preparing the next-tier response now rather than waiting for the threshold to be crossed.`]
       : [];
@@ -219,7 +250,31 @@ window.FloodGuardUI = (() => {
       <div class="ds-basis">Recommendation translates the current sensor status and short-term forecast into an actionable response, rather than a threshold-crossed alarm alone.</div>`;
   }
 
+  // ---- Animated water tube -------------------------------------------------
+  // A requestAnimationFrame loop redraws only the tube, so the water flows
+  // smoothly and glides to each new sensor reading. It pauses automatically
+  // when the tab is hidden and holds still if the user prefers reduced motion.
+  let tubeRaf = 0;
+  let tubeLast = 0;
+  let tubePhase = 0;
+  let tubeDisplayLevel = 0;
+  const tubeBubbles = [];
+  const tubeReduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  function tubeLoop(now) {
+    const dt = Math.min(0.05, (now - (tubeLast || now)) / 1000);
+    tubeLast = now;
+    if (!tubeReduceMotion) tubePhase += dt;
+    renderTube(dt);
+    tubeRaf = requestAnimationFrame(tubeLoop);
+  }
+
   function drawTube() {
+    if (!tubeRaf) tubeRaf = requestAnimationFrame(tubeLoop);
+    renderTube(0);
+  }
+
+  function renderTube(dt) {
     const tubeCanvas = $('tubeCanvas');
     if (!tubeCanvas) return;
     const ctx = tubeCanvas.getContext('2d');
@@ -261,24 +316,84 @@ window.FloodGuardUI = (() => {
     });
 
     const hasDisplayLevel = state.demoMode || state.hasVerifiedLiveReading;
-    const pct = hasDisplayLevel ? Math.min(state.level, config.TUBE_MAX_CM) / config.TUBE_MAX_CM : 0;
+    const target = hasDisplayLevel ? Math.min(state.level, config.TUBE_MAX_CM) : 0;
+    // Ease the drawn level toward the real level (frame-rate independent).
+    tubeDisplayLevel += (target - tubeDisplayLevel) * (dt > 0 ? 1 - Math.exp(-dt * 2.5) : 0);
+    if (Math.abs(target - tubeDisplayLevel) < 0.05) tubeDisplayLevel = target;
+    const pct = tubeDisplayLevel / config.TUBE_MAX_CM;
     const waterY = tubeBottom - pct * tubeH;
+    // Colour follows the true level, not the eased one, so it never lags.
     const st = statusForLevel(state.level);
+
+    function wavePath(amp, k, speed, offset) {
+      ctx.beginPath();
+      ctx.moveTo(tubeX, tubeBottom + 10);
+      for (let x = 0; x <= tubeW; x += 2) {
+        const y = waterY
+          + Math.sin(x * k + tubePhase * speed + offset) * amp
+          + Math.sin(x * k * 0.55 - tubePhase * speed * 0.7) * amp * 0.5;
+        ctx.lineTo(tubeX + x, y);
+      }
+      ctx.lineTo(tubeX + tubeW, tubeBottom + 10);
+      ctx.closePath();
+    }
+
+    // Back wave (lighter, slower, opposite direction of the front wave)
+    wavePath(3.2, 0.14, -1.3, 1.7);
+    ctx.fillStyle = st.color + '55';
+    ctx.fill();
+
+    // Front wave with depth gradient
     const grad = ctx.createLinearGradient(0, waterY, 0, tubeBottom);
     grad.addColorStop(0, st.color + 'cc');
     grad.addColorStop(1, st.color + '55');
+    wavePath(2.6, 0.18, 2.1, 0);
     ctx.fillStyle = grad;
-
-    ctx.beginPath();
-    ctx.moveTo(tubeX, tubeBottom + 10);
-    ctx.lineTo(tubeX, waterY);
-    for (let x = 0; x <= tubeW; x += 4) {
-      const y = waterY + Math.sin((x * 0.18) + state.wavePhase) * 3.2;
-      ctx.lineTo(tubeX + x, y);
-    }
-    ctx.lineTo(tubeX + tubeW, tubeBottom + 10);
-    ctx.closePath();
     ctx.fill();
+
+    // Bright surface line
+    ctx.beginPath();
+    for (let x = 0; x <= tubeW; x += 2) {
+      const y = waterY
+        + Math.sin(x * 0.18 + tubePhase * 2.1) * 2.6
+        + Math.sin(x * 0.18 * 0.55 - tubePhase * 2.1 * 0.7) * 1.3;
+      if (x === 0) ctx.moveTo(tubeX + x, y); else ctx.lineTo(tubeX + x, y);
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // Rising bubbles (only when there is real water and motion is allowed)
+    if (hasDisplayLevel && !tubeReduceMotion && dt > 0) {
+      if (pct > 0.04 && tubeBubbles.length < 9 && Math.random() < dt * 2.5) {
+        tubeBubbles.push({ x: tubeX + 8 + Math.random() * (tubeW - 16), y: tubeBottom - 4, r: 1 + Math.random() * 2, v: 12 + Math.random() * 18, ph: Math.random() * 6.28 });
+      }
+      for (let i = tubeBubbles.length - 1; i >= 0; i--) {
+        const b = tubeBubbles[i];
+        b.y -= b.v * dt;
+        b.x += Math.sin(tubePhase * 3 + b.ph) * 0.15;
+        if (b.y < waterY + 5) tubeBubbles.splice(i, 1);
+      }
+    } else if (!hasDisplayLevel) {
+      tubeBubbles.length = 0;
+    }
+    tubeBubbles.forEach((b) => {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    });
+
+    // Glass shine
+    const shine = ctx.createLinearGradient(tubeX, 0, tubeX + tubeW, 0);
+    shine.addColorStop(0, 'rgba(255,255,255,0.10)');
+    shine.addColorStop(0.18, 'rgba(255,255,255,0.02)');
+    shine.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = shine;
+    ctx.fillRect(tubeX, tubeTop, tubeW, tubeH);
     ctx.restore();
 
     config.THRESHOLDS.forEach((t) => {
