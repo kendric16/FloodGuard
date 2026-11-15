@@ -102,7 +102,7 @@ window.FloodGuardUI = (() => {
           <div class="s-desc">${c.desc}</div>
         </div>
       </div>${metricsHTML}
-      <div class="source-confidence">Auto-diagnosed from rate-of-rise correlation (simulated) · confidence <b>${(72 + Math.random() * 20).toFixed(0)}%</b></div>`;
+      <div class="source-confidence">Demo only — this is not a real diagnosis. No source-detection model is running.</div>`;
   }
 
   function renderForecast() {
@@ -479,7 +479,7 @@ window.FloodGuardUI = (() => {
 
     ctx.beginPath();
     state.history.forEach((p, i) => {
-      const x = padL + (i / (state.history.length - 1)) * plotW;
+      const x = padL + (i / Math.max(1, state.history.length - 1)) * plotW;
       const y = padT + plotH - (p.v / config.TUBE_MAX_CM) * plotH;
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
