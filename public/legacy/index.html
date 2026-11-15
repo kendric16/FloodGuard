@@ -131,13 +131,13 @@
           </section>
 
           <section class="card">
-            <h2>Water Level Trend <small>last 20 readings · 3 min intervals</small></h2>
+            <h2>Water Level Trend <small>last 40 readings</small></h2>
             <canvas id="trendChart" height="230"></canvas>
             <div class="stat-row">
               <div class="stat"><div class="k">Sensor status</div><div class="v ok" id="dashboardSensorStatus">Offline</div><div class="sub" id="dashboardSensorLabel">JSN-SR04T · ESP32</div></div>
-              <div class="stat"><div class="k">Alert latency</div><div class="v" id="latencyStat">3.1s</div><div class="sub">reading â†’ notification sent</div></div>
+              <div class="stat"><div class="k">Alert latency</div><div class="v" id="latencyStat">—</div><div class="sub">not yet measured</div></div>
               <div class="stat"><div class="k">Alerts today</div><div class="v" id="alertCountStat">0</div><div class="sub">across all channels</div></div>
-              <div class="stat"><div class="k">Uptime (30d)</div><div class="v ok">99.4%</div><div class="sub">sensor + link availability</div></div>
+              <div class="stat"><div class="k">Uptime (30d)</div><div class="v">—</div><div class="sub">not yet measured</div></div>
             </div>
           </section>
         </div>
@@ -150,7 +150,7 @@
         </section>
 
         <section class="card section-spaced dashboard-advanced">
-          <h2>Probable Water Source &amp; Cause <small>auto-diagnosed · rain-gauge &amp; rate-of-rise correlation</small></h2>
+          <h2>Probable Water Source &amp; Cause <small>demo only · not a real diagnosis</small></h2>
           <div class="source-body" id="sourceBody"></div>
         </section>
 
@@ -281,4 +281,3 @@
 <script src="assets/scripts/main.js"></script>
 </body>
 </html>
-
