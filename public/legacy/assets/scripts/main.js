@@ -408,8 +408,6 @@
     return 'online';
   }
 
-  const STALE_AFTER_MS = 5 * 60 * 1000;
-
   function formatAge(ms) {
     const min = Math.max(0, Math.floor(ms / 60000));
     if (min < 1) return 'less than a minute';
@@ -426,8 +424,7 @@
     const label = document.querySelector('.reading-label');
     const lastUpdate = $('lastUpdate');
     const connText = $('connText');
-    const stale = !state.demoMode && state.realtimeTelemetryActive && state.hasVerifiedLiveReading &&
-      (state.sensorFault === true || Date.now() - state.lastTelemetryAt > STALE_AFTER_MS);
+    const stale = logic.isReadingStale();
 
     if (!stale) {
       if (state.staleShown) {
