@@ -36,6 +36,13 @@ window.FloodGuardLogic = (() => {
     buildBackupPayload
   } = stateApi;
 
+  const STALE_AFTER_MS = 5 * 60 * 1000;
+
+  // True when the shown reading is old or the sensor reported a fault.
+  function isReadingStale() {
+    return !state.demoMode && state.realtimeTelemetryActive && state.hasVerifiedLiveReading &&
+      (state.sensorFault === true || Date.now() - Number(state.lastTelemetryAt || 0) > STALE_AFTER_MS);
+  }
 
   // ============================================================
   // 2. UPDATE ALERT STATUS BADGE
@@ -323,8 +330,10 @@ window.FloodGuardLogic = (() => {
     $('alertCountStat').textContent =
       state.alertsToday;
 
+    const lagS = state.liveTelemetryActive && state.lastTelemetryAt
+      ? (Date.now() - state.lastTelemetryAt) / 1000 : null;
     $('latencyStat').textContent =
-      (2 + Math.random() * 2).toFixed(1) + 's';
+      lagS !== null && lagS >= 0 && lagS < 600 ? lagS.toFixed(1) + 's' : '—';
 
     if (state.currentUser) {
       uiApi.renderDecisionSupport();
@@ -820,6 +829,12 @@ window.FloodGuardLogic = (() => {
   // ============================================================
   // Checks whether the water-level sensor is connected.
   //
+  // FAULT:
+  // The sensor reported a fault.
+  //
+  // DELAYED:
+  // The last reading is 2 to 5 minutes old.
+  //
   // ONLINE:
   // The sensor is connected and available.
   //
@@ -836,17 +851,20 @@ window.FloodGuardLogic = (() => {
     }
 
     const isConnected = state.sensorDevice.connected;
+    const age = Date.now() - Number(state.lastTelemetryAt || 0);
     const delayed = state.realtimeTelemetryActive && state.lastTelemetryAt
-      && Date.now() - state.lastTelemetryAt > 2 * 60 * 1000
-      && Date.now() - state.lastTelemetryAt <= 5 * 60 * 1000;
+      && age > 2 * 60 * 1000
+      && age <= 5 * 60 * 1000;
 
-    if (delayed) {
+    if (state.sensorFault === true && state.realtimeTelemetryActive) {
+      connPill.classList.add('offline');
+      connText.textContent = 'SENSOR FAULT';
+    } else if (delayed) {
       connPill.classList.remove('offline');
       connText.textContent = 'SENSOR DELAYED';
     } else if (isConnected) {
       connPill.classList.remove('offline');
       connText.textContent = 'SENSOR ONLINE';
-
     } else {
       connPill.classList.add('offline');
       connText.textContent = 'SENSOR OFFLINE';
@@ -873,7 +891,8 @@ window.FloodGuardLogic = (() => {
     rebuildAlertLogTable,
     updateMeta,
     updateBadge,
-    updateSensorStatus
+    updateSensorStatus,
+    isReadingStale
   };
 
 })();
