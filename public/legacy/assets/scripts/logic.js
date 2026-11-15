@@ -179,12 +179,12 @@ window.FloodGuardLogic = (() => {
     fireChannel(
       'chanSMS',
       'chanSMSState',
-      'sent · 184 recipients',
+      'not sent · browser only',
       1400
     );
 
     uiApi.toast(
-      'Automatic SMS response sent: ' + message
+      'Browser notice only (no SMS was sent): ' + message
     );
   }
 
@@ -217,10 +217,10 @@ window.FloodGuardLogic = (() => {
     const chanHTML = `
       <span class="chan sent">🖥️ Dashboard</span>
       ${st.key !== 'normal'
-        ? '<span class="chan sent">✉️ Auto SMS</span>'
+        ? '<span class="chan">✉️ Auto SMS (server-managed)</span>'
         : ''}
       ${st.key === 'critical'
-        ? '<span class="chan sent">🔊 Siren</span>'
+        ? '<span class="chan">🔊 Siren (server-managed)</span>'
         : ''}
     `;
 
@@ -251,10 +251,8 @@ window.FloodGuardLogic = (() => {
 
     state.alertIdCounter++;
 
-    const deliveryLabel =
-      'Delivered · ' +
-      (2 + Math.random() * 2).toFixed(1) +
-      's';
+    // Real SMS/siren delivery is recorded by the server, not measured here.
+    const deliveryLabel = 'Not measured here';
 
     const tr = document.createElement('tr');
 
@@ -270,7 +268,7 @@ window.FloodGuardLogic = (() => {
       <td>${chip}</td>
       <td>${causeHTML}</td>
       <td>${chanHTML}</td>
-      <td style="color:#31c48d">
+      <td style="color:#9aa7c7">
         ${deliveryLabel}
       </td>
     `;
@@ -329,11 +327,6 @@ window.FloodGuardLogic = (() => {
 
     $('alertCountStat').textContent =
       state.alertsToday;
-
-    const lagS = state.liveTelemetryActive && state.lastTelemetryAt
-      ? (Date.now() - state.lastTelemetryAt) / 1000 : null;
-    $('latencyStat').textContent =
-      lagS !== null && lagS >= 0 && lagS < 600 ? lagS.toFixed(1) + 's' : '—';
 
     if (state.currentUser) {
       uiApi.renderDecisionSupport();
@@ -508,10 +501,10 @@ window.FloodGuardLogic = (() => {
       const chanHTML =
         `<span class="chan sent">🖥️ Dashboard</span>` +
         (a.statusKey !== 'normal'
-          ? '<span class="chan sent">✉️ Auto SMS</span>'
+          ? '<span class="chan">✉️ Auto SMS (server-managed)</span>'
           : '') +
         (a.statusKey === 'critical'
-          ? '<span class="chan sent">🔊 Siren</span>'
+          ? '<span class="chan">🔊 Siren (server-managed)</span>'
           : '');
 
       const tr = document.createElement('tr');
@@ -526,7 +519,7 @@ window.FloodGuardLogic = (() => {
         <td>${chip}</td>
         <td>${causeHTML}</td>
         <td>${chanHTML}</td>
-        <td style="color:#31c48d">
+        <td style="color:#9aa7c7">
           ${a.delivery}
         </td>
       `;
@@ -892,7 +885,8 @@ window.FloodGuardLogic = (() => {
     updateMeta,
     updateBadge,
     updateSensorStatus,
-    isReadingStale
+    isReadingStale,
+    ensureAudioCtx
   };
 
 })();
