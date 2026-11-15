@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ============================================================
  * SCRIPT.JS
  * Main application initialization and event binding
@@ -245,10 +245,13 @@
     const now = new Date();
 
     updateFooterYear();
-    
+
     // Update sensor status indicator
     logic.updateSensorStatus();
-    
+
+    // Re-check every second whether the shown reading is old or faulty
+    applyStaleDisplay();
+
     if (!clockTime || !clockDate) return;
 
     const timeFormatter = new Intl.DateTimeFormat('en-US', {
@@ -286,14 +289,14 @@
     const connText = $('connText');
 
     if (statusEl) {
-      statusEl.textContent = health === 'delayed' ? '● Delayed' : connected ? '● Online' : '● Offline';
+      statusEl.textContent = health === 'fault' ? '● Sensor fault' : health === 'delayed' ? '● Delayed' : connected ? '● Online' : '● Offline';
       statusEl.classList.toggle('online', connected);
       statusEl.classList.toggle('offline', !connected);
       statusEl.classList.toggle('delayed', health === 'delayed');
     }
 
     if (dashboardStatusEl) {
-      dashboardStatusEl.textContent = health === 'delayed' ? 'Delayed' : connected ? 'Online' : 'Offline';
+      dashboardStatusEl.textContent = health === 'fault' ? 'Sensor fault' : health === 'delayed' ? 'Delayed' : connected ? 'Online' : 'Offline';
       dashboardStatusEl.classList.toggle('ok', connected);
       dashboardStatusEl.classList.toggle('warn', !connected);
     }
@@ -306,7 +309,7 @@
     logic.updateSensorStatus();
 
     if (connText) {
-      connText.textContent = health === 'delayed' ? 'SENSOR DELAYED' : connected ? 'SENSOR ONLINE' : 'SENSOR OFFLINE';
+      connText.textContent = health === 'fault' ? 'SENSOR FAULT' : health === 'delayed' ? 'SENSOR DELAYED' : connected ? 'SENSOR ONLINE' : 'SENSOR OFFLINE';
     }
 
     if (lastEl) {
@@ -376,6 +379,7 @@
 
   function showWaitingForLiveData() {
     state.hasVerifiedLiveReading = false;
+    state.serverStatusKey = null;
     state.realtimeTelemetryActive = false;
     state.liveTelemetryActive = false;
     state.history.length = 0;
@@ -396,11 +400,62 @@
   }
 
   function realtimeHealthStatus(reading, timestamp) {
+    if (reading.sensorFault === true) return 'fault';
     if (reading.isOnline === false) return 'offline';
     const age = Date.now() - timestamp;
     if (age > 5 * 60 * 1000) return 'offline';
     if (age > 2 * 60 * 1000) return 'delayed';
     return 'online';
+  }
+
+  const STALE_AFTER_MS = 5 * 60 * 1000;
+
+  function formatAge(ms) {
+    const min = Math.max(0, Math.floor(ms / 60000));
+    if (min < 1) return 'less than a minute';
+    if (min < 60) return `${min} min`;
+    const hours = Math.floor(min / 60);
+    if (hours < 48) return `${hours} hr`;
+    return `${Math.floor(hours / 24)} days`;
+  }
+
+  // Marks the reading as old or faulty so it is never mistaken for live data.
+  function applyStaleDisplay() {
+    const badge = $('statusBadge');
+    const tube = $('tubeCanvas');
+    const label = document.querySelector('.reading-label');
+    const lastUpdate = $('lastUpdate');
+    const connText = $('connText');
+    const stale = !state.demoMode && state.realtimeTelemetryActive && state.hasVerifiedLiveReading &&
+      (state.sensorFault === true || Date.now() - state.lastTelemetryAt > STALE_AFTER_MS);
+
+    if (!stale) {
+      if (state.staleShown) {
+        state.staleShown = false;
+        if (badge) badge.classList.remove('stale-data');
+        if (tube) tube.classList.remove('stale-data');
+        if (label) label.textContent = 'Current reading';
+      }
+      return;
+    }
+
+    state.staleShown = true;
+    const age = formatAge(Date.now() - state.lastTelemetryAt);
+    if (badge) { badge.textContent = state.sensorFault ? 'SENSOR FAULT' : 'NO LIVE DATA'; badge.classList.add('stale-data'); }
+    if (tube) tube.classList.add('stale-data');
+    if (label) label.textContent = `Last known reading · ${age} ago`;
+    if (lastUpdate) lastUpdate.textContent = state.sensorFault ? `sensor fault · last good reading ${age} ago` : `last reading ${age} ago`;
+    if (connText && state.sensorFault) connText.textContent = 'SENSOR FAULT';
+    if (state.sensorDevice.connected) {
+      setSensorConnectionState(false, {
+        label: 'Telemetry stale',
+        lastConnectionAt: state.lastTelemetryAt,
+        battery: state.sensorDevice.battery,
+        signal: state.sensorDevice.signal,
+        health: state.sensorFault ? 'fault' : 'offline',
+        notify: false
+      });
+    }
   }
 
   async function startRealtimeTelemetry() {
@@ -450,10 +505,13 @@
         const battery = Number(reading.batteryV);
         const signal = typeof reading.signal === 'string' && reading.signal.trim() ? reading.signal.trim() : 'Unknown';
         const healthStatus = realtimeHealthStatus(reading, timestamp);
+        state.sensorFault = reading.sensorFault === true;
         const online = healthStatus === 'online';
         const sirenActive = Boolean(reading.siren && reading.siren.active && Number(reading.siren.expiresAt) > Date.now());
 
         const liveLevel = Math.min(config.TUBE_MAX_CM, Math.max(0, level));
+        const serverStatusMap = { normal: 'normal', watch: 'normal', warning: 'alert', evacuate: 'critical' };
+        state.serverStatusKey = (reading.alert && serverStatusMap[reading.alert.status]) || null;
         state.hasVerifiedLiveReading = true;
         state.lastRealtimeLevel = liveLevel;
         if (!state.demoMode) {
@@ -484,6 +542,7 @@
         ui.drawChartOn($('trendChart'));
         ui.renderSourceCard();
         ui.renderForecast();
+        applyStaleDisplay();
         if (!state.demoMode) {
           const remoteAlertActive = reading.alert && reading.alert.status && reading.alert.status !== 'normal';
           $('chanSMS').classList.toggle('active', Boolean(remoteAlertActive));
@@ -990,6 +1049,9 @@
         ui.renderHistoryTable();
       }
 
+      // Never log or announce an alert from an old or faulty reading.
+      if (logic.isReadingStale()) return;
+
       if (st.key !== state.lastStatusKey) {
         if (state.demoMode) {
           logic.resetChannels();
@@ -1025,7 +1087,7 @@
     updateClock();
     setInterval(updateClock, 1000);
     autoConnectSensor();
-    setInterval(tick, 1400);
+    setInterval(() => { tick(); applyStaleDisplay(); }, 1400);
     fetchWeather();
     setInterval(fetchWeather, 5 * 60000);
     state.history.length = 0;
