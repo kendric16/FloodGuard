@@ -1153,3 +1153,12 @@ tbody tr:hover { background: rgba(111, 208, 242, 0.07); }
     scroll-behavior: auto !important;
   }
 }
+#statusBadge.stale-data {
+  color: #9aa7c7 !important;
+  background: rgba(154, 167, 199, 0.12) !important;
+  border-color: rgba(154, 167, 199, 0.35) !important;
+}
+
+#tubeCanvas.stale-data {
+  filter: grayscale(1) opacity(0.65);
+}
